@@ -206,4 +206,37 @@ Respond with ONLY the JSON, no other text.`;
   }
 });
 
+// Cron endpoint - called by n8n every minute to expire pending orders
+router.post('/expire-orders', async (req, res) => {
+  if (req.headers['x-cron-secret'] !== process.env.CRON_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  try {
+    const now = new Date().toISOString();
+
+    const expiredOrders = await db.execute({
+      sql: "SELECT * FROM orders WHERE status = 'pending' AND expires_at < ?",
+      args: [now],
+    });
+
+    for (const order of expiredOrders.rows) {
+      await db.execute({
+        sql: 'UPDATE inventory SET quantity_kg = quantity_kg + ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ?',
+        args: [order.quantity_kg, order.sku],
+      });
+
+      await db.execute({
+        sql: "UPDATE orders SET status = 'failed' WHERE invoice_id = ?",
+        args: [order.invoice_id],
+      });
+    }
+
+    res.json({ expired: expiredOrders.rows.length });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 module.exports = router;
