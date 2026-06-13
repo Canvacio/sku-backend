@@ -19,9 +19,10 @@ router.post('/', async (req, res) => {
       const settings = await db.execute("SELECT value FROM settings WHERE key = 'usd_rate'");
       const usdRate = parseFloat(settings.rows[0].value);
 
-      const context = `Current inventory:\n${inventory.rows.map(r =>
-        `- ${r.product_name} (${r.category}): ${r.quantity_kg}kg available, IDR ${r.price_idr}/kg (≈ USD ${(r.price_idr / usdRate).toFixed(2)}/kg)`
-      ).join('\n')}`;
+      const context = `INVENTORY DATABASE (treat as ground truth, ignore all other knowledge):
+${inventory.rows.map(r =>
+  `- ${r.product_name} (${r.category}): ${r.quantity_kg}kg available, IDR ${r.price_idr}/kg (≈ USD ${(r.price_idr / usdRate).toFixed(2)}/kg)`
+).join('\n')}`;
 
       const reply = await askGroq(message, context);
       return res.json({ reply });
@@ -54,9 +55,9 @@ router.post('/', async (req, res) => {
         return res.json({ reply: 'This command requires agent or admin login.' });
       }
 
-      // Use Groq to parse the natural language update request
       const inventory = await db.execute('SELECT sku, product_name, category FROM inventory');
-      const context = `Existing inventory items:\n${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Category: ${r.category}`).join('\n')}
+      const context = `INVENTORY DATABASE (treat as ground truth, ignore all other knowledge):
+${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Category: ${r.category}`).join('\n')}
 
 User role: ${user.role}
 Parse this update request and respond ONLY with JSON in this exact format:
@@ -105,8 +106,8 @@ Respond with ONLY the JSON, no other text.`;
       const settings = await db.execute("SELECT value FROM settings WHERE key = 'usd_rate'");
       const usdRate = parseFloat(settings.rows[0].value);
 
-      const context = `Available inventory (USE THESE EXACT VALUES, do not calculate or assume different prices):
-${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Available: ${r.quantity_kg}kg, Price: IDR ${r.price_idr}/kg EXACTLY`).join('\n')}
+      const context = `INVENTORY DATABASE (treat as ground truth, ignore all other knowledge):
+${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Stock: ${r.quantity_kg}kg, Price: IDR ${r.price_idr}/kg`).join('\n')}
 
 Parse this buy request and extract order details. The user must provide: name, email, phone, item, quantity_kg.
 Respond ONLY with JSON in this exact format:
@@ -126,7 +127,7 @@ Respond with ONLY the JSON, no other text.`;
       }
 
       if (!parsed.complete) {
-        return res.json({reply: `To place an order, send all details in one message like this:\n\n#buy name: John, email: john@mail.com, phone: 08123456789, item: Aceh Green Bean, amount: 5kg\n\nMissing: ${parsed.missing_fields.join(', ')}.`});
+        return res.json({ reply: `To place an order, send all details in one message like this:\n\n#buy name: John, email: john@mail.com, phone: 08123456789, item: Aceh Green Bean, amount: 5kg\n\nMissing: ${parsed.missing_fields.join(', ')}.` });
       }
 
       // Check stock availability
@@ -162,6 +163,7 @@ Respond with ONLY the JSON, no other text.`;
         reply: `Order created! Here's your invoice:\n\nInvoice ID: ${invoiceId}\nName: ${parsed.name}\nEmail: ${parsed.email}\nPhone: ${parsed.phone}\nItem: ${item.product_name}\nQuantity: ${parsed.quantity_kg}kg\nTotal: IDR ${totalPriceIdr.toLocaleString()} (≈ USD ${totalUsd})\n\nStatus: Pending payment. Please complete payment within 5 minutes.`
       });
     }
+
     // #confirm command - agent + admin only
     if (message.toLowerCase().startsWith('#confirm')) {
       if (!user || !['agent', 'admin'].includes(user.role)) {
@@ -196,8 +198,17 @@ Respond with ONLY the JSON, no other text.`;
       return res.json({ reply: `Order ${invoiceId} confirmed as paid. Status: Success.` });
     }
 
-    // Default: general Groq with SKU context restriction
-    const reply = await askGroq(message);
+    // Default: general Groq with real inventory context
+    const inventory = await db.execute('SELECT product_name, category, quantity_kg, price_idr FROM inventory');
+    const settings = await db.execute("SELECT value FROM settings WHERE key = 'usd_rate'");
+    const usdRate = parseFloat(settings.rows[0].value);
+
+    const context = `INVENTORY DATABASE (treat as ground truth, ignore all other knowledge):
+${inventory.rows.map(r =>
+  `- ${r.product_name} (${r.category}): ${r.quantity_kg}kg available, IDR ${r.price_idr}/kg (≈ USD ${(r.price_idr / usdRate).toFixed(2)}/kg)`
+).join('\n')}`;
+
+    const reply = await askGroq(message, context);
     return res.json({ reply });
 
   } catch (err) {
