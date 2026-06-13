@@ -105,8 +105,8 @@ Respond with ONLY the JSON, no other text.`;
       const settings = await db.execute("SELECT value FROM settings WHERE key = 'usd_rate'");
       const usdRate = parseFloat(settings.rows[0].value);
 
-      const context = `Available inventory:
-${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Available: ${r.quantity_kg}kg, Price: IDR ${r.price_idr}/kg`).join('\n')}
+      const context = `Available inventory (USE THESE EXACT VALUES, do not calculate or assume different prices):
+${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Available: ${r.quantity_kg}kg, Price: IDR ${r.price_idr}/kg EXACTLY`).join('\n')}
 
 Parse this buy request and extract order details. The user must provide: name, email, phone, item, quantity_kg.
 Respond ONLY with JSON in this exact format:
@@ -126,7 +126,7 @@ Respond with ONLY the JSON, no other text.`;
       }
 
       if (!parsed.complete) {
-        return res.json({ reply: `To complete your order, please provide: ${parsed.missing_fields.join(', ')}.` });
+        return res.json({reply: `To place an order, send all details in one message like this:\n\n#buy name: John, email: john@mail.com, phone: 08123456789, item: Aceh Green Bean, amount: 5kg\n\nMissing: ${parsed.missing_fields.join(', ')}.`});
       }
 
       // Check stock availability
