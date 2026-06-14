@@ -56,20 +56,20 @@ ${inventory.rows.map(r =>
       }
 
       const inventory = await db.execute('SELECT sku, product_name, category FROM inventory');
-    const context = `EXISTING INVENTORY (these are the only products that exist):
-        ${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Category: ${r.category}`).join('\n')}
+      const context = `EXISTING INVENTORY (these are the only products that exist):
+${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Category: ${r.category}`).join('\n')}
 
-        User role: ${user.role}
+User role: ${user.role}
 
-        RULES FOR PARSING:
-        1. If the message contains pipe-separated flags (category:, qty:, price:) → action is ALWAYS "add_new"
-        2. If the message only has a product name and +/-kg with no pipes → action is ALWAYS "adjust_quantity"
-        3. For "add_new": extract product_name (text before first pipe), category, qty as quantity_change, price as price_idr
-        4. For "adjust_quantity": match product_name to closest existing SKU (handle typos/case), extract quantity as positive or negative number
-        5. If user role is "agent", always set price_idr to null
+RULES FOR PARSING:
+1. If the message contains pipe-separated flags (category:, qty:, price:) → action is ALWAYS "add_new"
+2. If the message only has a product name and +/-kg with no pipes → action is ALWAYS "adjust_quantity"
+3. For "add_new": extract product_name (text before first pipe), category, qty as quantity_change, price as price_idr
+4. For "adjust_quantity": match product_name to closest existing SKU (handle typos/case), extract quantity as positive or negative number
+5. If user role is "agent", always set price_idr to null
 
-        Respond ONLY with JSON in this exact format, no other text:
-        {"action": "add_new" or "adjust_quantity", "sku": "existing SKU or null if new", "product_name": "string", "category": "string", "quantity_change": number, "price_idr": number or null}`;
+Respond ONLY with JSON in this exact format, no other text:
+{"action": "add_new" or "adjust_quantity", "sku": "existing SKU or null if new", "product_name": "string", "category": "string", "quantity_change": number, "price_idr": number or null}`;
 
       const groqResponse = await askGroq(message, context);
 
@@ -93,7 +93,6 @@ ${inventory.rows.map(r =>
           args: [newSku, parsed.product_name, parsed.category, parsed.quantity_change, parsed.price_idr || 0],
         });
         return res.json({ reply: `Added new item: ${parsed.product_name} (${parsed.quantity_change}kg) to inventory.` });
-
       } else {
         if (!parsed.sku || parsed.quantity_change === null || parsed.quantity_change === undefined) {
           return res.json({ reply: `Could not match that product. To adjust stock use this format:\n\n#update [product name] +[number]kg or -[number]kg\n\nExample:\n#update Aceh Green Bean +50kg` });
@@ -123,9 +122,9 @@ ${inventory.rows.map(r =>
       const context = `INVENTORY DATABASE (treat as ground truth, ignore all other knowledge):
 ${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Stock: ${r.quantity_kg}kg, Price: IDR ${r.price_idr}/kg`).join('\n')}
 
-Parse this buy request and extract order details. The user must provide: name, email, phone, item, quantity_kg.
+Parse this buy request and extract order details. The user must provide: name, email, phone, item, quantity_kg, address.
 Respond ONLY with JSON in this exact format:
-{"complete": true/false, "missing_fields": ["field1", ...], "name": "string or null", "email": "string or null", "phone": "string or null", "sku": "string or null", "product_name": "string or null", "quantity_kg": number or null}
+{"complete": true/false, "missing_fields": ["field1", ...], "name": "string or null", "email": "string or null", "phone": "string or null", "sku": "string or null", "product_name": "string or null", "quantity_kg": number or null, "address": "string or null"}
 
 If the item name has a typo, match it to the closest existing product_name and use its SKU.
 If any required field is missing, set complete to false and list missing fields.
@@ -141,7 +140,7 @@ Respond with ONLY the JSON, no other text.`;
       }
 
       if (!parsed.complete) {
-        return res.json({ reply: `To place an order, send all details in one message like this:\n\n#buy name: John, email: john@mail.com, phone: 08123456789, item: Aceh Green Bean, amount: 5kg\n\nMissing: ${parsed.missing_fields.join(', ')}.` });
+        return res.json({ reply: `To place an order, send all details in one message like this:\n\n#buy name: John, email: john@mail.com, phone: 08123456789, item: Aceh Green Bean, amount: 5kg, address: Jalan Sudirman No 45 Yogyakarta\n\nMissing: ${parsed.missing_fields.join(', ')}.` });
       }
 
       const item = inventory.rows.find(r => r.sku === parsed.sku);
@@ -164,15 +163,15 @@ Respond with ONLY the JSON, no other text.`;
       const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
       await db.execute({
-        sql: `INSERT INTO orders (invoice_id, guest_name, guest_email, guest_phone, sku, product_name, quantity_kg, price_idr_per_kg, total_price_idr, status, expires_at) 
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-        args: [invoiceId, parsed.name, parsed.email, parsed.phone, parsed.sku, item.product_name, parsed.quantity_kg, item.price_idr, totalPriceIdr, expiresAt],
+        sql: `INSERT INTO orders (invoice_id, guest_name, guest_email, guest_phone, guest_address, sku, product_name, quantity_kg, price_idr_per_kg, total_price_idr, status, expires_at) 
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+        args: [invoiceId, parsed.name, parsed.email, parsed.phone, parsed.address || '', parsed.sku, item.product_name, parsed.quantity_kg, item.price_idr, totalPriceIdr, expiresAt],
       });
 
       const totalUsd = (totalPriceIdr / usdRate).toFixed(2);
 
       return res.json({
-        reply: `Order created! Here's your invoice:\n\nInvoice ID: ${invoiceId}\nName: ${parsed.name}\nEmail: ${parsed.email}\nPhone: ${parsed.phone}\nItem: ${item.product_name}\nQuantity: ${parsed.quantity_kg}kg\nTotal: IDR ${totalPriceIdr.toLocaleString()} (≈ USD ${totalUsd})\n\nStatus: Pending payment. Please complete payment within 5 minutes.`
+        reply: `Order created! Here's your invoice:\n\nInvoice ID: ${invoiceId}\nName: ${parsed.name}\nEmail: ${parsed.email}\nPhone: ${parsed.phone}\nAddress: ${parsed.address || '-'}\nItem: ${item.product_name}\nQuantity: ${parsed.quantity_kg}kg\nTotal: IDR ${totalPriceIdr.toLocaleString()} (≈ USD ${totalUsd})\n\nStatus: Pending payment. Please complete payment within 5 minutes.`
       });
     }
 
