@@ -179,8 +179,7 @@ ${inventory.rows.map(r =>
       }
 
       const list = orders.rows.map(o => {
-        const expiresAt = new Date(o.expires_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-        return `• ${o.invoice_id}\n  Customer: ${o.guest_name} (${o.guest_email} | ${o.guest_phone})\n  Item: ${o.product_name} ${o.quantity_kg}kg\n  Total: IDR ${Number(o.total_price_idr).toLocaleString('id-ID')}\n  Expires at: ${expiresAt}`;
+        const expiresAt = new Date(o.expires_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' });        return `• ${o.invoice_id}\n  Customer: ${o.guest_name} (${o.guest_email} | ${o.guest_phone})\n  Item: ${o.product_name} ${o.quantity_kg}kg\n  Total: IDR ${Number(o.total_price_idr).toLocaleString('id-ID')}\n  Expires at: ${expiresAt}`;
       }).join('\n\n');
 
       return res.json({ reply: `Pending orders (${orders.rows.length}):\n\n${list}\n\nUse #confirm [invoice_id] to confirm payment.` });
