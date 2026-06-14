@@ -56,22 +56,20 @@ ${inventory.rows.map(r =>
       }
 
       const inventory = await db.execute('SELECT sku, product_name, category FROM inventory');
-      const context = `INVENTORY DATABASE (treat as ground truth, ignore all other knowledge):
-${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Category: ${r.category}`).join('\n')}
+    const context = `EXISTING INVENTORY (these are the only products that exist):
+        ${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Category: ${r.category}`).join('\n')}
 
-User role: ${user.role}
+        User role: ${user.role}
 
-The update request uses this format:
-- Add new item: #update add [name] | category: [category] | qty: [number]kg | price: [number]
-- Adjust quantity: #update [product_name] +[number]kg or -[number]kg
+        RULES FOR PARSING:
+        1. If the message contains pipe-separated flags (category:, qty:, price:) → action is ALWAYS "add_new"
+        2. If the message only has a product name and +/-kg with no pipes → action is ALWAYS "adjust_quantity"
+        3. For "add_new": extract product_name (text before first pipe), category, qty as quantity_change, price as price_idr
+        4. For "adjust_quantity": match product_name to closest existing SKU (handle typos/case), extract quantity as positive or negative number
+        5. If user role is "agent", always set price_idr to null
 
-Parse this update request and respond ONLY with JSON in this exact format:
-{"action": "add_new" or "adjust_quantity", "sku": "string or null if new", "product_name": "string", "category": "string", "quantity_change": number, "price_idr": number or null}
-
-For "add_new": extract name, category, qty, and price from the pipe-separated flags.
-For "adjust_quantity": match product_name to existing inventory (handle typos), use positive or negative quantity_change.
-If agent, set price_idr to null regardless of input.
-Respond with ONLY the JSON, no other text.`;
+        Respond ONLY with JSON in this exact format, no other text:
+        {"action": "add_new" or "adjust_quantity", "sku": "existing SKU or null if new", "product_name": "string", "category": "string", "quantity_change": number, "price_idr": number or null}`;
 
       const groqResponse = await askGroq(message, context);
 
