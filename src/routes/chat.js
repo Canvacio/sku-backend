@@ -109,7 +109,17 @@ Respond ONLY with JSON in this exact format, no other text:
         args.push(parsed.sku);
 
         await db.execute({ sql, args });
-        return res.json({ reply: `Updated ${parsed.product_name}: ${parsed.quantity_change > 0 ? '+' : ''}${parsed.quantity_change}kg` });
+
+          const updates = [];
+          if (parsed.quantity_change !== 0) {
+            updates.push(`stock ${parsed.quantity_change > 0 ? '+' : ''}${parsed.quantity_change}kg`);
+          }
+          if (parsed.price_idr && user.role === 'admin') {
+            updates.push(`price IDR ${parsed.price_idr.toLocaleString()}/kg`);
+          }
+
+          const updateSummary = updates.length > 0 ? updates.join(', ') : 'no changes detected';
+          return res.json({ reply: `Updated ${parsed.product_name}: ${updateSummary}` });
       }
     }
 
