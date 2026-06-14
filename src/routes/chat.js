@@ -5,7 +5,7 @@ const { askGroq } = require('../services/groq');
 const router = express.Router();
 
 router.post('/', async (req, res) => {
-  const { message } = req.body;
+  const { message, history = [] } = req.body;
   const user = req.user; // null if guest, { email, role } if authenticated
 
   if (!message) {
@@ -56,16 +56,22 @@ ${inventory.rows.map(r =>
       }
 
       const inventory = await db.execute('SELECT sku, product_name, category FROM inventory');
-      const context = `INVENTORY DATABASE (treat as ground truth, ignore all other knowledge):
-      ${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Category: ${r.category}`).join('\n')}
+        const context = `INVENTORY DATABASE (treat as ground truth, ignore all other knowledge):
+        ${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Category: ${r.category}`).join('\n')}
 
-      User role: ${user.role}
-      Parse this update request and respond ONLY with JSON in this exact format:
-      {"action": "add_new" or "adjust_quantity", "sku": "string or null if new", "product_name": "string", "category": "string", "quantity_change": number, "price_idr": number or null}
+        User role: ${user.role}
 
-      If the product_name closely matches an existing item (typo, case difference), use "adjust_quantity" with the existing SKU.
-      If admin and price is mentioned, include price_idr. If agent, set price_idr to null.
-      Respond with ONLY the JSON, no other text.`;
+        The update request uses this format:
+        - Add new item: #update add [name] | category: [category] | qty: [number]kg | price: [number]
+        - Adjust quantity: #update [product_name] +[number]kg or -[number]kg
+
+        Parse this update request and respond ONLY with JSON in this exact format:
+        {"action": "add_new" or "adjust_quantity", "sku": "string or null if new", "product_name": "string", "category": "string", "quantity_change": number, "price_idr": number or null}
+
+        For "add_new": extract name, category, qty, and price from the pipe-separated flags.
+        For "adjust_quantity": match product_name to existing inventory (handle typos), use positive or negative quantity_change.
+        If agent, set price_idr to null regardless of input.
+        Respond with ONLY the JSON, no other text.`;
 
       const groqResponse = await askGroq(message, context);
 
@@ -229,7 +235,7 @@ ${inventory.rows.map(r =>
   `- ${r.product_name} (${r.category}): ${r.quantity_kg}kg available, IDR ${r.price_idr}/kg (≈ USD ${(r.price_idr / usdRate).toFixed(2)}/kg)`
 ).join('\n')}`;
 
-    const reply = await askGroq(message, context);
+    const reply = await askGroq(message, context, history);
     return res.json({ reply });
 
   } catch (err) {
