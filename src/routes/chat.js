@@ -57,15 +57,15 @@ ${inventory.rows.map(r =>
 
       const inventory = await db.execute('SELECT sku, product_name, category FROM inventory');
       const context = `INVENTORY DATABASE (treat as ground truth, ignore all other knowledge):
-${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Category: ${r.category}`).join('\n')}
+      ${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Category: ${r.category}`).join('\n')}
 
-User role: ${user.role}
-Parse this update request and respond ONLY with JSON in this exact format:
-{"action": "add_new" or "adjust_quantity", "sku": "string or null if new", "product_name": "string", "category": "string", "quantity_change": number, "price_idr": number or null}
+      User role: ${user.role}
+      Parse this update request and respond ONLY with JSON in this exact format:
+      {"action": "add_new" or "adjust_quantity", "sku": "string or null if new", "product_name": "string", "category": "string", "quantity_change": number, "price_idr": number or null}
 
-If the product_name closely matches an existing item (typo, case difference), use "adjust_quantity" with the existing SKU.
-If admin and price is mentioned, include price_idr. If agent, set price_idr to null.
-Respond with ONLY the JSON, no other text.`;
+      If the product_name closely matches an existing item (typo, case difference), use "adjust_quantity" with the existing SKU.
+      If admin and price is mentioned, include price_idr. If agent, set price_idr to null.
+      Respond with ONLY the JSON, no other text.`;
 
       const groqResponse = await askGroq(message, context);
 
@@ -107,15 +107,15 @@ Respond with ONLY the JSON, no other text.`;
       const usdRate = parseFloat(settings.rows[0].value);
 
       const context = `INVENTORY DATABASE (treat as ground truth, ignore all other knowledge):
-${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Stock: ${r.quantity_kg}kg, Price: IDR ${r.price_idr}/kg`).join('\n')}
+      ${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Stock: ${r.quantity_kg}kg, Price: IDR ${r.price_idr}/kg`).join('\n')}
 
-Parse this buy request and extract order details. The user must provide: name, email, phone, item, quantity_kg.
-Respond ONLY with JSON in this exact format:
-{"complete": true/false, "missing_fields": ["field1", ...], "name": "string or null", "email": "string or null", "phone": "string or null", "sku": "string or null", "product_name": "string or null", "quantity_kg": number or null}
+      Parse this buy request and extract order details. The user must provide: name, email, phone, item, quantity_kg.
+      Respond ONLY with JSON in this exact format:
+      {"complete": true/false, "missing_fields": ["field1", ...], "name": "string or null", "email": "string or null", "phone": "string or null", "sku": "string or null", "product_name": "string or null", "quantity_kg": number or null}
 
-If the item name has a typo, match it to the closest existing product_name and use its SKU.
-If any required field is missing, set complete to false and list missing fields.
-Respond with ONLY the JSON, no other text.`;
+      If the item name has a typo, match it to the closest existing product_name and use its SKU.
+      If any required field is missing, set complete to false and list missing fields.
+      Respond with ONLY the JSON, no other text.`;
 
       const groqResponse = await askGroq(message, context);
 
@@ -162,6 +162,28 @@ Respond with ONLY the JSON, no other text.`;
       return res.json({
         reply: `Order created! Here's your invoice:\n\nInvoice ID: ${invoiceId}\nName: ${parsed.name}\nEmail: ${parsed.email}\nPhone: ${parsed.phone}\nItem: ${item.product_name}\nQuantity: ${parsed.quantity_kg}kg\nTotal: IDR ${totalPriceIdr.toLocaleString()} (≈ USD ${totalUsd})\n\nStatus: Pending payment. Please complete payment within 5 minutes.`
       });
+    }
+    
+    // #pending command - agent + admin only
+    if (message.toLowerCase().startsWith('#pending')) {
+      if (!user || !['agent', 'admin'].includes(user.role)) {
+        return res.json({ reply: 'This command requires agent or admin login.' });
+      }
+
+      const orders = await db.execute(
+        "SELECT invoice_id, guest_name, guest_email, guest_phone, product_name, quantity_kg, total_price_idr, expires_at FROM orders WHERE status = 'pending' ORDER BY created_at DESC"
+      );
+
+      if (orders.rows.length === 0) {
+        return res.json({ reply: 'No pending orders at the moment.' });
+      }
+
+      const list = orders.rows.map(o => {
+        const expiresAt = new Date(o.expires_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+        return `• ${o.invoice_id}\n  Customer: ${o.guest_name} (${o.guest_email} | ${o.guest_phone})\n  Item: ${o.product_name} ${o.quantity_kg}kg\n  Total: IDR ${Number(o.total_price_idr).toLocaleString('id-ID')}\n  Expires at: ${expiresAt}`;
+      }).join('\n\n');
+
+      return res.json({ reply: `Pending orders (${orders.rows.length}):\n\n${list}\n\nUse #confirm [invoice_id] to confirm payment.` });
     }
 
     // #confirm command - agent + admin only
