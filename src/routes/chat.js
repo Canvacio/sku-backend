@@ -56,22 +56,22 @@ ${inventory.rows.map(r =>
       }
 
       const inventory = await db.execute('SELECT sku, product_name, category FROM inventory');
-        const context = `INVENTORY DATABASE (treat as ground truth, ignore all other knowledge):
-        ${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Category: ${r.category}`).join('\n')}
+      const context = `INVENTORY DATABASE (treat as ground truth, ignore all other knowledge):
+${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Category: ${r.category}`).join('\n')}
 
-        User role: ${user.role}
+User role: ${user.role}
 
-        The update request uses this format:
-        - Add new item: #update add [name] | category: [category] | qty: [number]kg | price: [number]
-        - Adjust quantity: #update [product_name] +[number]kg or -[number]kg
+The update request uses this format:
+- Add new item: #update add [name] | category: [category] | qty: [number]kg | price: [number]
+- Adjust quantity: #update [product_name] +[number]kg or -[number]kg
 
-        Parse this update request and respond ONLY with JSON in this exact format:
-        {"action": "add_new" or "adjust_quantity", "sku": "string or null if new", "product_name": "string", "category": "string", "quantity_change": number, "price_idr": number or null}
+Parse this update request and respond ONLY with JSON in this exact format:
+{"action": "add_new" or "adjust_quantity", "sku": "string or null if new", "product_name": "string", "category": "string", "quantity_change": number, "price_idr": number or null}
 
-        For "add_new": extract name, category, qty, and price from the pipe-separated flags.
-        For "adjust_quantity": match product_name to existing inventory (handle typos), use positive or negative quantity_change.
-        If agent, set price_idr to null regardless of input.
-        Respond with ONLY the JSON, no other text.`;
+For "add_new": extract name, category, qty, and price from the pipe-separated flags.
+For "adjust_quantity": match product_name to existing inventory (handle typos), use positive or negative quantity_change.
+If agent, set price_idr to null regardless of input.
+Respond with ONLY the JSON, no other text.`;
 
       const groqResponse = await askGroq(message, context);
 
@@ -81,24 +81,25 @@ ${inventory.rows.map(r =>
       } catch (e) {
         return res.json({ reply: 'Could not understand the update request. Please rephrase.' });
       }
-        // Validate parsed fields before executing
-        if (parsed.action === 'add_new') {
-          if (!parsed.product_name || !parsed.category || !parsed.quantity_change || parsed.quantity_change === 0) {
-            return res.json({ reply: `Missing details. To add a new item use this format:\n\n#update add [product name] | category: [category] | qty: [number]kg | price: [number]\n\nExample:\n#update add Mandheling Grade 1 | category: Coffee Beans | qty: 50kg | price: 180000` });
-          }
-          if (user.role === 'admin' && !parsed.price_idr) {
-            return res.json({ reply: `Missing price. Admin must include price when adding new items:\n\n#update add [product name] | category: [category] | qty: [number]kg | price: [number]` });
-          }
-          const newSku = parsed.sku || parsed.product_name.toUpperCase().replace(/\s+/g, '-').slice(0, 20);
 
       if (parsed.action === 'add_new') {
+        if (!parsed.product_name || !parsed.category || !parsed.quantity_change || parsed.quantity_change === 0) {
+          return res.json({ reply: `Missing details. To add a new item use this format:\n\n#update add [product name] | category: [category] | qty: [number]kg | price: [number]\n\nExample:\n#update add Mandheling Grade 1 | category: Coffee Beans | qty: 50kg | price: 180000` });
+        }
+        if (user.role === 'admin' && !parsed.price_idr) {
+          return res.json({ reply: `Missing price. Admin must include price when adding new items:\n\n#update add [product name] | category: [category] | qty: [number]kg | price: [number]` });
+        }
         const newSku = parsed.sku || parsed.product_name.toUpperCase().replace(/\s+/g, '-').slice(0, 20);
         await db.execute({
           sql: 'INSERT INTO inventory (sku, product_name, category, quantity_kg, price_idr) VALUES (?, ?, ?, ?, ?)',
           args: [newSku, parsed.product_name, parsed.category, parsed.quantity_change, parsed.price_idr || 0],
         });
         return res.json({ reply: `Added new item: ${parsed.product_name} (${parsed.quantity_change}kg) to inventory.` });
+
       } else {
+        if (!parsed.sku || parsed.quantity_change === null || parsed.quantity_change === undefined) {
+          return res.json({ reply: `Could not match that product. To adjust stock use this format:\n\n#update [product name] +[number]kg or -[number]kg\n\nExample:\n#update Aceh Green Bean +50kg` });
+        }
         let sql = 'UPDATE inventory SET quantity_kg = quantity_kg + ?, updated_at = CURRENT_TIMESTAMP';
         let args = [parsed.quantity_change];
 
@@ -122,15 +123,15 @@ ${inventory.rows.map(r =>
       const usdRate = parseFloat(settings.rows[0].value);
 
       const context = `INVENTORY DATABASE (treat as ground truth, ignore all other knowledge):
-      ${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Stock: ${r.quantity_kg}kg, Price: IDR ${r.price_idr}/kg`).join('\n')}
+${inventory.rows.map(r => `- SKU: ${r.sku}, Name: ${r.product_name}, Stock: ${r.quantity_kg}kg, Price: IDR ${r.price_idr}/kg`).join('\n')}
 
-      Parse this buy request and extract order details. The user must provide: name, email, phone, item, quantity_kg.
-      Respond ONLY with JSON in this exact format:
-      {"complete": true/false, "missing_fields": ["field1", ...], "name": "string or null", "email": "string or null", "phone": "string or null", "sku": "string or null", "product_name": "string or null", "quantity_kg": number or null}
+Parse this buy request and extract order details. The user must provide: name, email, phone, item, quantity_kg.
+Respond ONLY with JSON in this exact format:
+{"complete": true/false, "missing_fields": ["field1", ...], "name": "string or null", "email": "string or null", "phone": "string or null", "sku": "string or null", "product_name": "string or null", "quantity_kg": number or null}
 
-      If the item name has a typo, match it to the closest existing product_name and use its SKU.
-      If any required field is missing, set complete to false and list missing fields.
-      Respond with ONLY the JSON, no other text.`;
+If the item name has a typo, match it to the closest existing product_name and use its SKU.
+If any required field is missing, set complete to false and list missing fields.
+Respond with ONLY the JSON, no other text.`;
 
       const groqResponse = await askGroq(message, context);
 
@@ -145,7 +146,6 @@ ${inventory.rows.map(r =>
         return res.json({ reply: `To place an order, send all details in one message like this:\n\n#buy name: John, email: john@mail.com, phone: 08123456789, item: Aceh Green Bean, amount: 5kg\n\nMissing: ${parsed.missing_fields.join(', ')}.` });
       }
 
-      // Check stock availability
       const item = inventory.rows.find(r => r.sku === parsed.sku);
       if (!item) {
         return res.json({ reply: `Sorry, we couldn't find "${parsed.product_name}" in our inventory.` });
@@ -156,7 +156,6 @@ ${inventory.rows.map(r =>
         return res.json({ reply: `Sorry, we only have ${item.quantity_kg}kg of ${item.product_name} available. We're currently experiencing high demand - you can order up to ${maxSuggestion}kg right now. Would you like to proceed with that amount?` });
       }
 
-      // Reserve stock immediately
       await db.execute({
         sql: 'UPDATE inventory SET quantity_kg = quantity_kg - ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ?',
         args: [parsed.quantity_kg, parsed.sku],
@@ -178,7 +177,7 @@ ${inventory.rows.map(r =>
         reply: `Order created! Here's your invoice:\n\nInvoice ID: ${invoiceId}\nName: ${parsed.name}\nEmail: ${parsed.email}\nPhone: ${parsed.phone}\nItem: ${item.product_name}\nQuantity: ${parsed.quantity_kg}kg\nTotal: IDR ${totalPriceIdr.toLocaleString()} (≈ USD ${totalUsd})\n\nStatus: Pending payment. Please complete payment within 5 minutes.`
       });
     }
-    
+
     // #pending command - agent + admin only
     if (message.toLowerCase().startsWith('#pending')) {
       if (!user || !['agent', 'admin'].includes(user.role)) {
@@ -194,7 +193,8 @@ ${inventory.rows.map(r =>
       }
 
       const list = orders.rows.map(o => {
-        const expiresAt = new Date(o.expires_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' });        return `• ${o.invoice_id}\n  Customer: ${o.guest_name} (${o.guest_email} | ${o.guest_phone})\n  Item: ${o.product_name} ${o.quantity_kg}kg\n  Total: IDR ${Number(o.total_price_idr).toLocaleString('id-ID')}\n  Expires at: ${expiresAt}`;
+        const expiresAt = new Date(o.expires_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' });
+        return `• ${o.invoice_id}\n  Customer: ${o.guest_name} (${o.guest_email} | ${o.guest_phone})\n  Item: ${o.product_name} ${o.quantity_kg}kg\n  Total: IDR ${Number(o.total_price_idr).toLocaleString('id-ID')}\n  Expires at: ${expiresAt}`;
       }).join('\n\n');
 
       return res.json({ reply: `Pending orders (${orders.rows.length}):\n\n${list}\n\nUse #confirm [invoice_id] to confirm payment.` });
