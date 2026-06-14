@@ -81,6 +81,15 @@ ${inventory.rows.map(r =>
       } catch (e) {
         return res.json({ reply: 'Could not understand the update request. Please rephrase.' });
       }
+        // Validate parsed fields before executing
+        if (parsed.action === 'add_new') {
+          if (!parsed.product_name || !parsed.category || !parsed.quantity_change || parsed.quantity_change === 0) {
+            return res.json({ reply: `Missing details. To add a new item use this format:\n\n#update add [product name] | category: [category] | qty: [number]kg | price: [number]\n\nExample:\n#update add Mandheling Grade 1 | category: Coffee Beans | qty: 50kg | price: 180000` });
+          }
+          if (user.role === 'admin' && !parsed.price_idr) {
+            return res.json({ reply: `Missing price. Admin must include price when adding new items:\n\n#update add [product name] | category: [category] | qty: [number]kg | price: [number]` });
+          }
+          const newSku = parsed.sku || parsed.product_name.toUpperCase().replace(/\s+/g, '-').slice(0, 20);
 
       if (parsed.action === 'add_new') {
         const newSku = parsed.sku || parsed.product_name.toUpperCase().replace(/\s+/g, '-').slice(0, 20);
